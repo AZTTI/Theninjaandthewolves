@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>2D Ninja Forest</title>
+  <style>
+    * { margin: 0; padding: 0; }
+    canvas { display: block; background: #334; }
+    #info { position: absolute; top: 10px; left: 10px; color: #fff; font-family: sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="info">Use arrow keys to move. Press "D" to distract wolves (3s). Press "R" to restart.</div>
+  <canvas id="game" width="800" height="600"></canvas>
+  <script>
+  // 2D Ninja Forest: full flow through dragonworld ending
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  // State variables
+  let scene = 'forest'; // 'forest', 'flying', 'dragonworld', 'end'
+  let keys = {};
+  let orbCollected = false;
+  let distracted = false;
+  let distractionStart = 0;
+  let gameOver = false;
+  let dropY = null;
+  let speechTimer = 0;
+  let startTime = 0;
+  let extraSpawned = false;
+
+  // Entities
+  const playerStart = { x: 50, y: 550 };
+  const player = { x: playerStart.x, y: playerStart.y, size: 48, speed: 3 };
+  const orb = { x: 400, y: 300, size: 16 };
+  const dragon = { x: 750, y: 50, size: 48 };
+  const dragonEntity = { x: 0, y: 0, size: 64 };
+  const wolves = [];
+  const extraWolves = [];
+  const ninjas = [];
+
+  function initEntities() {
+    // Initialize wolf orbiters and ninja allies
+    wolves.length = 0;
+    extraWolves.length = 0;
+    ninjas.length = 0;
+    for (let i = 0; i < 4; i++) {
+      const angle = i * (Math.PI * 2 / 4);
+      const radius = 80 + i * 10;
+      wolves.push({ angle, radius, size: 32, speed: 0.02, x: 0, y: 0 });
+      ninjas.push({ x: 200 + i * 120, y: 500, size: 32 });
+    }
+    orbCollected = false;
+    distracted = false;
+    distractionStart = 0;
+    gameOver = false;
+    scene = 'forest';
+    player.x = playerStart.x;
+    player.y = playerStart.y;
+    dropY = null;
+    speechTimer = 0;
+    startTime = Date.now();
+    extraSpawned = false;
+  }
+
+  // Start the game
+  initEntities();
+
+  // Input listeners
+  window.addEventListener('keydown', e => { keys[e.key] = true; });
+  window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+  // Main update
+  function update() {
+    // Restart from any scene
+    if (keys['r'] || keys['R']) initEntities();
+
+    if (scene === 'forest') updateForest();
+    else if (scene === 'flying') updateFlying();
+    else if (scene === 'dragonworld') updateDragonWorld();
+  }
+
+  function updateForest() {
+    const now = Date.now();
+    const elapsed = (now - startTime) / 1000;
+    // Spawn extra wolves after 5s
+    if (!extraSpawned && elapsed > 5) {
+      extraSpawned = true;
+      extraWolves.push(
+        { x: 0, y: 250, size: 32, speedX: 2 },
+        { x: canvas.width - 32, y: 350, size: 32, speedX: -2 }
+      );
+    }
+    // Movement
+    if (keys['ArrowLeft']) player.x -= player.speed;
+    if (keys['ArrowRight']) player.x += player.speed;
+    if (keys['ArrowUp']) player.y -= player.speed;
+    if (keys['ArrowDown']) player.y += player.speed;
+    // Boundaries
+    player.x = Math.max(0, Math.min(canvas.width - player.size, player.x));
+    player.y = Math.max(0, Math.min(canvas.height - player.size, player.y));
+    // Distraction window (3s)
+    if ((keys['d'] || keys['D']) && !distracted) {
+      distracted = true;
+      distractionStart = now;
+    }
+    if (distracted && now - distractionStart > 3000) distracted = false;
+    // Wolves orbit/distract
+    wolves.forEach((w, i) => {
+      if (distracted) {
+        w.x = ninjas[i].x;
+        w.y = ninjas[i].y;
+      } else {
+        w.angle += w.speed;
+        w.x = orb.x + orb.size / 2 + w.radius * Math.cos(w.angle) - w.size / 2;
+        w.y = orb.y + orb.size / 2 + w.radius * Math.sin(w.angle) - w.size * 0.3;
+      }
+    });
+    // Extra wolves horizontal
+    extraWolves.forEach(w => {
+      w.x += w.speedX;
+      if (w.x < -w.size) w.x = canvas.width;
+      if (w.x > canvas.width) w.x = -w.size;
+    });
+    // Collision
+    [...wolves, ...extraWolves].forEach(w => {
+      if (player.x < w.x + w.size && player.x + player.size > w.x &&
+          player.y < w.y + w.size * 0.6 && player.y + player.size > w.y) {
+        gameOver = true;
+      }
+    });
+    if (gameOver) return;
+    // Orb pickup
+    if (!orbCollected &&
+        player.x < orb.x + orb.size && player.x + player.size > orb.x &&
+        player.y < orb.y + orb.size && player.y + player.size > orb.y) {
+      orbCollected = true;
+    }
+    // Mount dragon
+    if (orbCollected &&
+        player.x < dragon.x + dragon.size && player.x + player.size > dragon.x &&
+        player.y < dragon.y + dragon.size && player.y + player.size > dragon.y) {
+      scene = 'flying';
+      dragonEntity.x = player.x - 20;
+      dragonEntity.y = player.y - 20;
+    }
+  }
+
+  function updateFlying() {
+    // Fly up
+    player.y -= 4;
+    dragonEntity.y -= 4;
+    dragonEntity.x = player.x - 20;
+    // Drop orb mid-flight
+    if (dropY === null && player.y < canvas.height / 2) dropY = player.y + 50;
+    // Arrive in dragonworld
+    if (player.y + player.size < 0) {
+      scene = 'dragonworld';
+      speechTimer = 120;
+    }
+  }
+
+  function updateDragonWorld() {
+    // Wait for speechTimer then end
+    if (speechTimer > 0) speechTimer--;
+    else scene = 'end';
+  }
+
+  // Drawing
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (scene === 'forest') drawForest();
+    else if (scene === 'flying') drawFlying();
+    else if (scene === 'dragonworld') drawDragonWorld();
+    else if (scene === 'end') drawEnd();
+  }
+
+  function drawBackground() {
+    ctx.fillStyle = '#223';
+    ctx.fillRect(0, 200, canvas.width, canvas.height - 200);
+    for (let i = 0; i < 6; i++) {
+      const tx = i * 150 + 20;
+      ctx.fillStyle = '#472'; ctx.fillRect(tx + 10, 180, 10, 60);
+      ctx.fillStyle = '#2a4'; ctx.beginPath();
+      ctx.arc(tx + 15, 180, 30, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawNinja(x, y, s, color) {
+    const st = s;
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, st * 0.6, st);
+    ctx.fillRect(x - st * 0.1, y + st * 0.3, st * 0.8, st * 0.1);
+    ctx.fillRect(x + st * 0.1, y + st * 0.8, st * 0.15, st * 0.2);
+    ctx.fillRect(x + st * 0.35, y + st * 0.8, st * 0.15, st * 0.2);
+    ctx.fillStyle = '#f5c28b';
+    ctx.fillRect(x + st * 0.15, y + st * 0.05, st * 0.3, st * 0.2);
+    ctx.fillStyle = '#d00';
+    ctx.fillRect(x + st * 0.1, y + st * 0.25, st * 0.4, st * 0.1);
+  }
+
+  function drawWolf(x, y, s) {
+    const st = s;
+    ctx.fillStyle = '#777';
+    ctx.fillRect(x, y, st, st * 0.6);
+    ctx.fillRect(x + st * 0.6, y - st * 0.2, st * 0.6, st * 0.6);
+    ctx.fillStyle = '#555';
+    ctx.fillRect(x + st * 0.65, y - st * 0.3, st * 0.1, st * 0.1);
+    ctx.fillRect(x + st * 1.05, y - st * 0.3, st * 0.1, st * 0.1);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(x + st * 0.85, y - st * 0.05, st * 0.1, st * 0.1);
+    ctx.fillRect(x + st * 1.0, y - st * 0.05, st * 0.1, st * 0.1);
+  }
+
+  function drawOrb(x, y, s) {
+    ctx.fillStyle = '#ff0';
+    ctx.beginPath();
+    ctx.arc(x + s / 2, y + s / 2, s / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#fa0'; ctx.stroke();
+  }
+
+  function drawDragon(x, y, s) {
+    const st = s;
+    ctx.fillStyle = '#090';
+    ctx.fillRect(x, y + st * 0.2, st, st * 0.6);
+    ctx.fillRect(x + st * 0.8, y, st * 0.5, st * 0.5);
+    ctx.fillStyle = '#070';
+    ctx.beginPath();
+    ctx.moveTo(x + st * 0.2, y + st * 0.4);
+    ctx.lineTo(x - st * 0.3, y);
+    ctx.lineTo(x - st * 0.3, y + st * 0.6);
+    ctx.closePath(); ctx.fill();
+  }
+
+  function drawForest() {
+    drawBackground();
+    wolves.forEach(w => drawWolf(w.x, w.y, w.size));
+    extraWolves.forEach(w => drawWolf(w.x, w.y, w.size));
+    if (!orbCollected) drawOrb(orb.x, orb.y, orb.size);
+    ninjas.forEach(n => drawNinja(n.x, n.y, n.size, '#444'));
+    drawDragon(dragon.x, dragon.y, dragon.size);
+    drawNinja(player.x, player.y, player.size, orbCollected ? '#d00' : '#000');
+    if (gameOver) {
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#f55';
+      ctx.font = '48px sans-serif';
+      ctx.fillText('You Died! Press R to Retry', 150, 300);
+    }
+  }
+
+  function drawFlying() {
+    drawBackground();
+    wolves.forEach(w => drawWolf(w.x, w.y, w.size));
+    extraWolves.forEach(w => drawWolf(w.x, w.y, w.size));
+    ninjas.forEach(n => drawNinja(n.x, n.y, n.size, '#444'));
+    drawDragon(dragonEntity.x, dragonEntity.y, dragonEntity.size);
+    if (dropY !== null) drawOrb(orb.x, dropY, orb.size);
+    drawNinja(player.x, player.y, player.size, '#d00');
+  }
+
+  function drawDragonWorld() {
+    ctx.fillStyle = '#276'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (speechTimer > 0) {
+      ctx.fillStyle = 'lightgreen'; ctx.font = '24px sans-serif';
+      ctx.fillText('Oh now... Welcome to the other world!', 200, 300);
+    }
+  }
+
+  function drawEnd() {
+    ctx.fillStyle = '#113'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#fff'; ctx.font = '36px sans-serif';
+    ctx.fillText('The End. Press R to Play Again.', 150, 300);
+  }
+
+  // Main loop
+  (function loop() { update(); draw(); requestAnimationFrame(loop); })();
+  </script>
+</body>
+</html>
