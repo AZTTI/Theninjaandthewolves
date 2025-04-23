@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>2D Ninja Forest</title>
+  <title>2D Ninja Adventure</title>
   <style>
     * { margin: 0; padding: 0; }
     canvas { display: block; background: #334; }
@@ -11,272 +11,143 @@
   </style>
 </head>
 <body>
-  <div id="info">Use arrow keys to move. Press "D" to distract wolves (3s). Press "R" to restart.</div>
+  <div id="info">Use ←↑↓→ to move. D distract (3s). Space shoot. G gaze. R restart. Enter to start.</div>
   <canvas id="game" width="800" height="600"></canvas>
   <script>
-  // 2D Ninja Forest: full flow through dragonworld ending
-  const canvas = document.getElementById('game');
-  const ctx = canvas.getContext('2d');
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
 
-  // State variables
-  let scene = 'forest'; // 'forest', 'flying', 'dragonworld', 'end'
-  let keys = {};
-  let orbCollected = false;
-  let distracted = false;
-  let distractionStart = 0;
-  let gameOver = false;
-  let dropY = null;
-  let speechTimer = 0;
-  let startTime = 0;
-  let extraSpawned = false;
+    let scene = 'start';
+    let keys = {};
+    let dropY = null;
 
-  // Entities
-  const playerStart = { x: 50, y: 550 };
-  const player = { x: playerStart.x, y: playerStart.y, size: 48, speed: 3 };
-  const orb = { x: 400, y: 300, size: 16 };
-  const dragon = { x: 750, y: 50, size: 48 };
-  const dragonEntity = { x: 0, y: 0, size: 64 };
-  const wolves = [];
-  const extraWolves = [];
-  const ninjas = [];
+    // Level1 state
+    let orbCount = 0, distracted = false, distractionStart = 0, gameOver = false;
+    let hasGun = false, startTime = 0, extraSpawned = false;
 
-  function initEntities() {
-    // Initialize wolf orbiters and ninja allies
-    wolves.length = 0;
-    extraWolves.length = 0;
-    ninjas.length = 0;
-    for (let i = 0; i < 4; i++) {
-      const angle = i * (Math.PI * 2 / 4);
-      const radius = 80 + i * 10;
-      wolves.push({ angle, radius, size: 32, speed: 0.02, x: 0, y: 0 });
-      ninjas.push({ x: 200 + i * 120, y: 500, size: 32 });
+    // Level2 state
+    let gems = [], gemTouched = 0, caveOpen = false;
+    let spiders = [], bullets = [], level2Start = 0, wave = 1;
+
+    // Entities
+    const player = { x:50, y:550, size:48, speed:3 };
+    const orb = { x:400, y:300, size:16 };
+    const gunPickup = { x:600, y:520, size:16 };
+    const dragonPos = { x:700, y:80, size:48 };
+    const dragonEntity = { x:0, y:0, size:64 };
+    const wolves = [], extraWolves = [], ninjas = [];
+
+    function initLevel1(){
+      wolves.length = extraWolves.length = ninjas.length = 0;
+      for(let i=0;i<4;i++){
+        const angle = i*(Math.PI*2/4), radius=80+i*10;
+        wolves.push({angle,radius,size:32,speed:0.02,x:0,y:0});
+        ninjas.push({x:200+i*120,y:500,size:32});
+      }
+      orbCount=0;distracted=false;gameOver=false;hasGun=false;
+      player.x=50;player.y=550;
+      startTime=Date.now();extraSpawned=false;dropY=null;
     }
-    orbCollected = false;
-    distracted = false;
-    distractionStart = 0;
-    gameOver = false;
-    scene = 'forest';
-    player.x = playerStart.x;
-    player.y = playerStart.y;
-    dropY = null;
-    speechTimer = 0;
-    startTime = Date.now();
-    extraSpawned = false;
-  }
 
-  // Start the game
-  initEntities();
-
-  // Input listeners
-  window.addEventListener('keydown', e => { keys[e.key] = true; });
-  window.addEventListener('keyup', e => { keys[e.key] = false; });
-
-  // Main update
-  function update() {
-    // Restart from any scene
-    if (keys['r'] || keys['R']) initEntities();
-
-    if (scene === 'forest') updateForest();
-    else if (scene === 'flying') updateFlying();
-    else if (scene === 'dragonworld') updateDragonWorld();
-  }
-
-  function updateForest() {
-    const now = Date.now();
-    const elapsed = (now - startTime) / 1000;
-    // Spawn extra wolves after 5s
-    if (!extraSpawned && elapsed > 5) {
-      extraSpawned = true;
-      extraWolves.push(
-        { x: 0, y: 250, size: 32, speedX: 2 },
-        { x: canvas.width - 32, y: 350, size: 32, speedX: -2 }
-      );
+    function initLevel2(){
+      gems=[];gemTouched=0;caveOpen=false;
+      spawnGem();spiders=[];bullets=[];
+      wave=1;level2Start=Date.now();spawnSpiders(wave);
+      player.x=50;player.y=550;
     }
-    // Movement
-    if (keys['ArrowLeft']) player.x -= player.speed;
-    if (keys['ArrowRight']) player.x += player.speed;
-    if (keys['ArrowUp']) player.y -= player.speed;
-    if (keys['ArrowDown']) player.y += player.speed;
-    // Boundaries
-    player.x = Math.max(0, Math.min(canvas.width - player.size, player.x));
-    player.y = Math.max(0, Math.min(canvas.height - player.size, player.y));
-    // Distraction window (3s)
-    if ((keys['d'] || keys['D']) && !distracted) {
-      distracted = true;
-      distractionStart = now;
+
+    function spawnGem(){
+      const x=Math.random()*(canvas.width-32);
+      const y=Math.random()*(canvas.height-200)+200;
+      gems.push({x,y,size:24});
     }
-    if (distracted && now - distractionStart > 3000) distracted = false;
-    // Wolves orbit/distract
-    wolves.forEach((w, i) => {
-      if (distracted) {
-        w.x = ninjas[i].x;
-        w.y = ninjas[i].y;
-      } else {
-        w.angle += w.speed;
-        w.x = orb.x + orb.size / 2 + w.radius * Math.cos(w.angle) - w.size / 2;
-        w.y = orb.y + orb.size / 2 + w.radius * Math.sin(w.angle) - w.size * 0.3;
+    function spawnSpiders(count){
+      spiders=[];
+      for(let i=0;i<count;i++){
+        spiders.push({x:100+i*120,y:220,size:32,dir:1,active:false,spawnTime:level2Start + i*3000});
+      }
+    }
+
+    window.addEventListener('keydown',e=>{
+      keys[e.key]=true;
+      if(scene==='start'&&e.key==='Enter'){
+        initLevel1();scene='forest'; keys['Enter']=false;
       }
     });
-    // Extra wolves horizontal
-    extraWolves.forEach(w => {
-      w.x += w.speedX;
-      if (w.x < -w.size) w.x = canvas.width;
-      if (w.x > canvas.width) w.x = -w.size;
-    });
-    // Collision
-    [...wolves, ...extraWolves].forEach(w => {
-      if (player.x < w.x + w.size && player.x + player.size > w.x &&
-          player.y < w.y + w.size * 0.6 && player.y + player.size > w.y) {
-        gameOver = true;
+    window.addEventListener('keyup',e=>{keys[e.key]=false;});
+
+    function update(){
+      if(scene!=='start' && (keys['r']||keys['R'])){ scene='start'; keys['r']=keys['R']=false; return; }
+      if(scene==='start') return;
+      if(scene==='forest') updateForest();
+      else if(scene==='flying') updateFlying();
+      else if(scene==='dragonworld'){ initLevel2(); scene='level2'; }
+      else if(scene==='level2') updateLevel2();
+    }
+
+    function updateForest(){
+      const now=Date.now(),elapsed=(now-startTime)/1000;
+      if(!extraSpawned&&elapsed>5){ extraSpawned=true;
+        extraWolves.push({x:0,y:250,size:32,speedX:2},{x:canvas.width-32,y:350,size:32,speedX:-2});
       }
-    });
-    if (gameOver) return;
-    // Orb pickup
-    if (!orbCollected &&
-        player.x < orb.x + orb.size && player.x + player.size > orb.x &&
-        player.y < orb.y + orb.size && player.y + player.size > orb.y) {
-      orbCollected = true;
+      if(keys['ArrowLeft'])player.x-=player.speed;
+      if(keys['ArrowRight'])player.x+=player.speed;
+      if(keys['ArrowUp'])player.y-=player.speed;
+      if(keys['ArrowDown'])player.y+=player.speed;
+      player.x=clamp(player.x,0,canvas.width-player.size);
+      player.y=clamp(player.y,0,canvas.height-player.size);
+      if((keys['d']||keys['D'])&&!distracted){distracted=true;distractionStart=now;}
+      if(distracted&&now-distractionStart>3000)distracted=false;
+      wolves.forEach((w,i)=>{
+        if(distracted){w.x=ninjas[i].x;w.y=ninjas[i].y;}else{
+          w.angle+=w.speed;
+          w.x=orb.x+orb.size/2+w.radius*Math.cos(w.angle)-w.size/2;
+          w.y=orb.y+orb.size/2+w.radius*Math.sin(w.angle)-w.size*0.3;
+        }
+      });
+      extraWolves.forEach(w=>{w.x+=w.speedX;if(w.x<-w.size)w.x=canvas.width;if(w.x>canvas.width)w.x=-w.size;});
+      if(!hasGun&&collision(player,gunPickup))hasGun=true;
+      if(orbCount===0&&collision(player,orb))orbCount=1;
+      if(orbCount&&collision(player,dragonPos))scene='flying',dragonEntity.x=player.x-20,dragonEntity.y=player.y-20;
     }
-    // Mount dragon
-    if (orbCollected &&
-        player.x < dragon.x + dragon.size && player.x + player.size > dragon.x &&
-        player.y < dragon.y + dragon.size && player.y + player.size > dragon.y) {
-      scene = 'flying';
-      dragonEntity.x = player.x - 20;
-      dragonEntity.y = player.y - 20;
+    function updateFlying(){ player.y-=4;dragonEntity.y-=4;dragonEntity.x=player.x-20; if(player.y+player.size<0)scene='dragonworld'; }
+    function updateLevel2(){
+      const now=Date.now();
+      if(keys['ArrowLeft'])player.x-=player.speed;
+      if(keys['ArrowRight'])player.x+=player.speed;
+      if(keys['ArrowUp'])player.y-=player.speed;
+      if(keys['ArrowDown'])player.y+=player.speed;
+      player.x=clamp(player.x,0,canvas.width-player.size);
+      player.y=clamp(player.y,0,canvas.height-player.size);
+      for(let i=gems.length-1;i>=0;i--)if(collision(player,gems[i])){gems.splice(i,1);gemTouched++;if(gemTouched<5)spawnGem();else caveOpen=true;}
+      spiders.forEach(s=>{if(!s.active&&now>=s.spawnTime)s.active=true;});
+      const atk=spiders.find(s=>s.active);
+      if(atk){atk.x+=atk.dir; if(atk.x<0||atk.x>canvas.width-atk.size)atk.dir*=-1; if(collision(player,atk))gameOver=true;}
+      if(gameOver)return;
+      if(hasGun&&keys[' ']&&bullets.length<5){bullets.push({x:player.x+player.size/2,y:player.y,vy:-5,size:8});keys[' ']=false;}
+      bullets.forEach((b,bi)=>{b.y+=b.vy;if(b.y<0)bullets.splice(bi,1);spiders.forEach((s,si)=>{if(s.active&&collision(b,s)){spiders.splice(si,1);bullets.splice(bi,1);}});});
+      if((keys['g']||keys['G'])&&atk){spiders=spiders.filter(s=>s!==atk);keys['g']=false;}
+      if(spiders.length===0&&caveOpen){wave++;level2Start=now;spawnSpiders(wave);}
+      if(caveOpen&&player.x>canvas.width-80&&player.y<80)scene='end';
     }
-  }
+    function clamp(v,min,max){return v<min?min:v>max?max:v;}
+    function collision(a,b){return a.x<b.x+b.size&&a.x+a.size>b.x&&a.y<b.y+b.size&&a.y+a.size>b.y;}
 
-  function updateFlying() {
-    // Fly up
-    player.y -= 4;
-    dragonEntity.y -= 4;
-    dragonEntity.x = player.x - 20;
-    // Drop orb mid-flight
-    if (dropY === null && player.y < canvas.height / 2) dropY = player.y + 50;
-    // Arrive in dragonworld
-    if (player.y + player.size < 0) {
-      scene = 'dragonworld';
-      speechTimer = 120;
-    }
-  }
-
-  function updateDragonWorld() {
-    // Wait for speechTimer then end
-    if (speechTimer > 0) speechTimer--;
-    else scene = 'end';
-  }
-
-  // Drawing
-  function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (scene === 'forest') drawForest();
-    else if (scene === 'flying') drawFlying();
-    else if (scene === 'dragonworld') drawDragonWorld();
-    else if (scene === 'end') drawEnd();
-  }
-
-  function drawBackground() {
-    ctx.fillStyle = '#223';
-    ctx.fillRect(0, 200, canvas.width, canvas.height - 200);
-    for (let i = 0; i < 6; i++) {
-      const tx = i * 150 + 20;
-      ctx.fillStyle = '#472'; ctx.fillRect(tx + 10, 180, 10, 60);
-      ctx.fillStyle = '#2a4'; ctx.beginPath();
-      ctx.arc(tx + 15, 180, 30, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  function drawNinja(x, y, s, color) {
-    const st = s;
-    ctx.fillStyle = color;
-    ctx.fillRect(x, y, st * 0.6, st);
-    ctx.fillRect(x - st * 0.1, y + st * 0.3, st * 0.8, st * 0.1);
-    ctx.fillRect(x + st * 0.1, y + st * 0.8, st * 0.15, st * 0.2);
-    ctx.fillRect(x + st * 0.35, y + st * 0.8, st * 0.15, st * 0.2);
-    ctx.fillStyle = '#f5c28b';
-    ctx.fillRect(x + st * 0.15, y + st * 0.05, st * 0.3, st * 0.2);
-    ctx.fillStyle = '#d00';
-    ctx.fillRect(x + st * 0.1, y + st * 0.25, st * 0.4, st * 0.1);
-  }
-
-  function drawWolf(x, y, s) {
-    const st = s;
-    ctx.fillStyle = '#777';
-    ctx.fillRect(x, y, st, st * 0.6);
-    ctx.fillRect(x + st * 0.6, y - st * 0.2, st * 0.6, st * 0.6);
-    ctx.fillStyle = '#555';
-    ctx.fillRect(x + st * 0.65, y - st * 0.3, st * 0.1, st * 0.1);
-    ctx.fillRect(x + st * 1.05, y - st * 0.3, st * 0.1, st * 0.1);
-    ctx.fillStyle = '#000';
-    ctx.fillRect(x + st * 0.85, y - st * 0.05, st * 0.1, st * 0.1);
-    ctx.fillRect(x + st * 1.0, y - st * 0.05, st * 0.1, st * 0.1);
-  }
-
-  function drawOrb(x, y, s) {
-    ctx.fillStyle = '#ff0';
-    ctx.beginPath();
-    ctx.arc(x + s / 2, y + s / 2, s / 2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#fa0'; ctx.stroke();
-  }
-
-  function drawDragon(x, y, s) {
-    const st = s;
-    ctx.fillStyle = '#090';
-    ctx.fillRect(x, y + st * 0.2, st, st * 0.6);
-    ctx.fillRect(x + st * 0.8, y, st * 0.5, st * 0.5);
-    ctx.fillStyle = '#070';
-    ctx.beginPath();
-    ctx.moveTo(x + st * 0.2, y + st * 0.4);
-    ctx.lineTo(x - st * 0.3, y);
-    ctx.lineTo(x - st * 0.3, y + st * 0.6);
-    ctx.closePath(); ctx.fill();
-  }
-
-  function drawForest() {
-    drawBackground();
-    wolves.forEach(w => drawWolf(w.x, w.y, w.size));
-    extraWolves.forEach(w => drawWolf(w.x, w.y, w.size));
-    if (!orbCollected) drawOrb(orb.x, orb.y, orb.size);
-    ninjas.forEach(n => drawNinja(n.x, n.y, n.size, '#444'));
-    drawDragon(dragon.x, dragon.y, dragon.size);
-    drawNinja(player.x, player.y, player.size, orbCollected ? '#d00' : '#000');
-    if (gameOver) {
-      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#f55';
-      ctx.font = '48px sans-serif';
-      ctx.fillText('You Died! Press R to Retry', 150, 300);
-    }
-  }
-
-  function drawFlying() {
-    drawBackground();
-    wolves.forEach(w => drawWolf(w.x, w.y, w.size));
-    extraWolves.forEach(w => drawWolf(w.x, w.y, w.size));
-    ninjas.forEach(n => drawNinja(n.x, n.y, n.size, '#444'));
-    drawDragon(dragonEntity.x, dragonEntity.y, dragonEntity.size);
-    if (dropY !== null) drawOrb(orb.x, dropY, orb.size);
-    drawNinja(player.x, player.y, player.size, '#d00');
-  }
-
-  function drawDragonWorld() {
-    ctx.fillStyle = '#276'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    if (speechTimer > 0) {
-      ctx.fillStyle = 'lightgreen'; ctx.font = '24px sans-serif';
-      ctx.fillText('Oh now... Welcome to the other world!', 200, 300);
-    }
-  }
-
-  function drawEnd() {
-    ctx.fillStyle = '#113'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#fff'; ctx.font = '36px sans-serif';
-    ctx.fillText('The End. Press R to Play Again.', 150, 300);
-  }
-
-  // Main loop
-  (function loop() { update(); draw(); requestAnimationFrame(loop); })();
+    function draw(){ctx.clearRect(0,0,canvas.width,canvas.height);if(scene==='start')drawStart();else if(scene==='forest')drawForest();else if(scene==='flying')drawFlying();else if(scene==='dragonworld')drawDragonWorld();else if(scene==='level2')drawLevel2();else if(scene==='end')drawEnd();}
+    function drawStart(){ctx.fillStyle='#113';ctx.fillRect(0,0,800,600);for(let i=0;i<10;i++)drawCircle(Math.random()*800,Math.random()*600,16,'#0ff','#0aa');drawNinja(300,300,64,'#000');drawDragon(450,300,64);ctx.fillStyle='#fff';ctx.font='36px sans-serif';ctx.fillText('Press Enter to Start',250,500);}
+    function drawForest(){drawBackground();wolves.forEach(drawWolf);extraWolves.forEach(drawWolf);if(!orbCount)drawCircle(orb.x,orb.y,orb.size,'#ff0','#fa0');if(!hasGun)drawCircle(gunPickup.x,gunPickup.y,gunPickup.size,'#888','#444');ninjas.forEach(n=>drawNinja(n.x,n.y,n.size,'#444'));drawDragon(dragonPos.x,dragonPos.y,dragonPos.size);drawNinja(player.x,player.y,player.size,orbCount?'#d00':'#000');if(gameOver)drawOverlay('You Died! Press R to Restart');}
+    function drawFlying(){drawBackground();wolves.forEach(drawWolf);extraWolves.forEach(drawWolf);ninjas.forEach(n=>drawNinja(n.x,n.y,n.size,'#444'));drawDragon(dragonEntity.x,dragonEntity.y,dragonEntity.size);if(dropY!==null)drawCircle(orb.x,dropY,orb.size,'#ff0','#fa0');drawNinja(player.x,player.y,player.size,'#d00');}
+    function drawDragonWorld(){ctx.fillStyle='#276';ctx.fillRect(0,0,800,600);}
+    function drawLevel2(){drawBackground();gems.forEach(g=>drawCircle(g.x,g.y,g.size,'#0ff','#0aa'));if(caveOpen)ctx.fillRect(canvas.width-80,0,80,80);spiders.forEach(drawSpider);bullets.forEach(b=>drawCircle(b.x,b.y,b.size,'#fff','#ccc'));drawNinja(player.x,player.y,player.size,'#000');if(gameOver)drawOverlay('You Died! Press R to Restart');}
+    function drawEnd(){ctx.fillStyle='#113';ctx.fillRect(0,0,800,600);ctx.fillStyle='#fff';ctx.font='36px sans-serif';ctx.fillText('The End! Press R to Restart',150,300);}
+    function drawBackground(){ctx.fillStyle='#223';ctx.fillRect(0,200,800,400);for(let i=0;i<6;i++){const tx=i*150+20;ctx.fillStyle='#472';ctx.fillRect(tx+10,180,10,60);ctx.fillStyle='#2a4';ctx.beginPath();ctx.arc(tx+15,180,30,0,Math.PI*2);ctx.fill();}}
+    function drawNinja(x,y,s,c){const st=s;ctx.fillStyle=c;ctx.fillRect(x,y,st*0.6,st);ctx.fillRect(x-st*0.1,y+st*0.3,st*0.8,st*0.1);ctx.fillRect(x+st*0.1,y+st*0.8,st*0.15,st*0.2);ctx.fillRect(x+st*0.35,y+st*0.8,st*0.15,st*0.2);ctx.fillStyle='#f5c28b';ctx.fillRect(x+st*0.15,y+st*0.05,st*0.3,st*0.2);ctx.fillStyle='#d00';ctx.fillRect(x+st*0.1,y+st*0.25,st*0.4,st*0.1);}
+    function drawWolf(w){const x=w.x,y=w.y,s=w.size;ctx.fillStyle='#777';ctx.fillRect(x,y,s,s*0.6);ctx.fillRect(x+s*0.6,y-s*0.2,s*0.6,s*0.6);ctx.fillStyle='#555';ctx.fillRect(x+s*0.65,y-s*0.3,s*0.1,s*0.1);ctx.fillRect(x+s*1.05,y-s*0.3,s*0.1,s*0.1);ctx.fillStyle='#000';ctx.fillRect(x+s*0.85,y-s*0.05,s*0.1,s*0.1);ctx.fillRect(x+s*1.0,y-s*0.05,s*0.1,s*0.1);}
+    function drawSpider(s){const x=s.x,y=s.y,siz=s.size;ctx.fillStyle='#a00';ctx.beginPath();ctx.arc(x+siz/2,y+siz/2,siz/2,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#600';ctx.lineWidth=2;for(let i=0;i<4;i++){const ang=Math.PI/4+i*(Math.PI/2);ctx.beginPath();ctx.moveTo(x+siz/2,y+siz/2);ctx.lineTo(x+siz/2+Math.cos(ang)*siz,y+siz/2+Math.sin(ang)*siz);ctx.stroke();}}
+    function drawDragon(x,y,s){const st=s;ctx.fillStyle='#090';ctx.fillRect(x,y+st*0.2,st,st*0.6);ctx.fillRect(x+st*0.8,y,st*0.5,st*0.5);ctx.fillStyle='#070';ctx.beginPath();ctx.moveTo(x+st*0.2,y+st*0.4);ctx.lineTo(x-st*0.3,y);ctx.lineTo(x-st*0.3,y+st*0.6);ctx.closePath();ctx.fill();}
+    function drawCircle(x,y,size,fill,stroke){ctx.fillStyle=fill;ctx.beginPath();ctx.arc(x+size/2,y+size/2,size/2,0,Math.PI*2);ctx.fill();ctx.strokeStyle=stroke;ctx.stroke();}
+    function drawOverlay(txt){ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(0,0,800,600);ctx.fillStyle='#f55';ctx.font='48px sans-serif';ctx.fillText(txt,100,300);}
+    ;(function loop(){update();draw();requestAnimationFrame(loop);})();
   </script>
 </body>
 </html>
